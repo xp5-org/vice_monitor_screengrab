@@ -374,7 +374,6 @@ def get_full_charset(context):
     charset_size = 256 * 8
 
     dump_bytes = send_single_command(
-        context,
         cmdlabel,
         f"m {charset_base:04x} {charset_base + charset_size - 1:04x}"
     )
@@ -490,13 +489,11 @@ def update_text_inputs(events, screen, font, boxes, state):
             for box in boxes:
                 box["active"] = box["rect"].collidepoint(event.pos)
                 if "save_rect" in box and box["save_rect"].collidepoint(event.pos):
-                    # check if save button clicked
                     box["saved"] = True
                     print(f"Saved: {box.get('text', '')}")
                     filename=box.get('text')
                     my_save_function(state, filename)
                 if "load_rect" in box and box["load_rect"].collidepoint(event.pos):
-                    # check if load button clicked
                     fileindexpos = state.get("scroll_selected", -1)
                     files = state.get("files", [])
                     if 0 <= fileindexpos < len(files):
@@ -603,7 +600,6 @@ def save_screen_chararray(filename, charset, screen_chars, fullgrid):
             f.write(f"unsigned char {name}[] = {{\n")
             flat_data = []
             
-            # flatten list
             for item in data:
                 if isinstance(item, list):
                     flat_data.extend(item)
@@ -611,14 +607,11 @@ def save_screen_chararray(filename, charset, screen_chars, fullgrid):
                     flat_data.append(item)
 
             for i, val in enumerate(flat_data):
-                # write hexadecimal val
                 f.write(f"0x{val:02X}")
                 
-                # Add a comma if it's not the last element
                 if i != len(flat_data) - 1:
                     f.write(",")
                 
-                # handle spacing & newlines
                 if (i + 1) % 8 == 0:
                     f.write("\n")
                 elif i != len(flat_data) - 1:
@@ -628,9 +621,7 @@ def save_screen_chararray(filename, charset, screen_chars, fullgrid):
             for i, row in enumerate(fullgrid):
                 row_cols = len(row)
                 
-                # debug print dimensions for the current row
                 #print(f"Row {i:02d} (Index {i}): {row_cols} columns wide.")
-
 
         if charset is not None:
             write_array("chars", charset)
@@ -652,7 +643,6 @@ charset_all_bytes = None
 fullgridoutput = None
 screen_chars = None
 scroll_y = 0
-# Scrollbox 1 state
 viewport1 = pygame.Rect(20, 500, 150, 100)
 scroll1 = 0
 selected1 = None
