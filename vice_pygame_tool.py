@@ -5,6 +5,7 @@ import socket
 import time
 import json
 import inspect
+import inspect
 
 
 C64_COLORS = {
@@ -40,6 +41,9 @@ BUTTON2_RECT = pygame.Rect(140, 20, 100, 40)
 BUTTON3_RECT = pygame.Rect(260, 20, 100, 40)
 BUTTON4_RECT = pygame.Rect(380, 20, 100, 40)
 BUTTON5_RECT = pygame.Rect(500, 20, 100, 40)
+BUTTON6_RECT = pygame.Rect(620, 20, 100, 40)
+BUTTON7_RECT = pygame.Rect(740, 20, 100, 40)
+BUTTON8_RECT = pygame.Rect(860, 20, 100, 40)
 square_visible = False
 square_color = (255, 0, 0)
 square_rect = pygame.Rect(300, 200, 40, 40)
@@ -52,12 +56,24 @@ GRID_MARGIN_Y_PCT = 0.1
 GRID_WIDTH_PCT = 0.7
 GRID_HEIGHT_PCT = 0.8
 
+button1_color = (200, 200, 200)
+button2_color = (200, 200, 200)
+button3_color = (200, 200, 200)
+button4_color = (200, 200, 200)
+button5_color = (200, 200, 200)
+button6_color = (200, 200, 200)
+button7_color = (200, 200, 200)
+button8_color = (200, 200, 200)
+
 def draw_buttons():
-    pygame.draw.rect(SCREEN, (200, 200, 200), BUTTON1_RECT)
-    pygame.draw.rect(SCREEN, (200, 200, 200), BUTTON2_RECT)
-    pygame.draw.rect(SCREEN, (200, 200, 200), BUTTON3_RECT)
-    pygame.draw.rect(SCREEN, (200, 200, 200), BUTTON4_RECT)
-    pygame.draw.rect(SCREEN, (200, 200, 200), BUTTON5_RECT)
+    pygame.draw.rect(SCREEN, button1_color, BUTTON1_RECT)
+    pygame.draw.rect(SCREEN, button2_color, BUTTON2_RECT)
+    pygame.draw.rect(SCREEN, button3_color, BUTTON3_RECT)
+    pygame.draw.rect(SCREEN, button4_color, BUTTON4_RECT)
+    pygame.draw.rect(SCREEN, button5_color, BUTTON5_RECT)
+    pygame.draw.rect(SCREEN, button6_color, BUTTON6_RECT)
+    pygame.draw.rect(SCREEN, button7_color, BUTTON7_RECT)
+    pygame.draw.rect(SCREEN, button8_color, BUTTON8_RECT)
     font = pygame.font.SysFont(None, 24)
     SCREEN.blit(font.render("cell bg", True, (0,0,0)), 
                 (BUTTON1_RECT.x + 5, BUTTON1_RECT.y + 10))
@@ -69,7 +85,12 @@ def draw_buttons():
                 (BUTTON4_RECT.x + 5, BUTTON4_RECT.y + 10))
     SCREEN.blit(font.render("romcharset", True, (0,0,0)), 
                 (BUTTON5_RECT.x + 5, BUTTON5_RECT.y + 10))
-
+    SCREEN.blit(font.render("bitmap", True, (0,0,0)), 
+            (BUTTON6_RECT.x + 5, BUTTON6_RECT.y + 10))
+    SCREEN.blit(font.render("toggle", True, (0,0,0)), 
+            (BUTTON7_RECT.x + 5, BUTTON7_RECT.y + 10))
+    SCREEN.blit(font.render("writebitmap", True, (0,0,0)), 
+        (BUTTON8_RECT.x + 5, BUTTON8_RECT.y + 10))
 
 def draw_square():
     if square_visible:
@@ -79,6 +100,104 @@ def draw_square():
 
 
 
+
+def parse_vic_state(context):
+    cmdlabel = inspect.currentframe().f_code.co_name
+    output = send_single_command(cmdlabel, "io d000")
+    
+    state = {}
+
+    raster_match = re.search(r'Raster cycle/line:\s*(\d+)/(\d+)\s*IRQ:\s*(\d+)', output)
+    if raster_match:
+        state['raster_cycle'] = int(raster_match.group(1))
+        state['raster_line'] = int(raster_match.group(2))
+        state['irq'] = int(raster_match.group(3))
+    
+    mode_match = re.search(r'Mode:\s*(.*?)\s*\(ECM/BMM/MCM=(\d)/(\d)/(\d)\)', output)
+    if mode_match:
+        state['mode'] = mode_match.group(1)
+        state['ecm'] = int(mode_match.group(2))
+        state['bmm'] = int(mode_match.group(3))
+        state['mcm'] = int(mode_match.group(4))
+    
+    colors_match = re.search(r'Colors: Border: (\w+) BG: (\w+)', output)
+    if colors_match:
+        state['border_color'] = int(colors_match.group(1), 16)
+        state['bg_color'] = int(colors_match.group(2), 16)
+    
+    scroll_match = re.search(r'Scroll X/Y: (\d+)/(\d+), RC (\d+), Idle: (\d+), 40x25', output)
+    if scroll_match:
+        state['scroll_x'] = int(scroll_match.group(1))
+        state['scroll_y'] = int(scroll_match.group(2))
+        state['rc'] = int(scroll_match.group(3))
+        state['idle'] = int(scroll_match.group(4))
+    
+
+
+    video_match = re.search(
+        r'Video\s*\$\s*([0-9a-fA-F]+),\s*(?:Bitmap|Charset)\s*\$\s*([0-9a-fA-F]+)',
+        output, re.MULTILINE
+    )
+
+    if video_match:
+        state['video_base'] = int(video_match.group(1), 16)
+        state['bitmap_base'] = int(video_match.group(2), 16)
+    else:
+        state['video_base'] = None
+        state['bitmap_base'] = None
+
+    # compute VIC bank only after parsing video_base
+    video_base = state['video_base']
+    if video_base is not None:
+        if 0x0000 <= video_base <= 0x3FFF:
+            vic_bank = 0
+        elif 0x4000 <= video_base <= 0x7FFF:
+            vic_bank = 1
+        elif 0x8000 <= video_base <= 0xBFFF:
+            vic_bank = 2
+        elif 0xC000 <= video_base <= 0xFFFF:
+            vic_bank = 3
+        else:
+            vic_bank = None
+    else:
+        vic_bank = None
+
+    state['vic_bank'] = vic_bank
+
+    vc_match = re.search(
+    r'VC\s*\$([0-9a-f]+),\s*VCBASE\s*\$([0-9a-f]+),\s*VMLI\s*(\d+),\s*Phi1\s*\$([0-9a-f]+)',
+    output, re.IGNORECASE | re.MULTILINE
+)
+
+    if vc_match:
+        state['vc'] = int(vc_match.group(1), 16)
+        state['vcbase'] = int(vc_match.group(2), 16)
+        state['vmlines'] = int(vc_match.group(3))
+        state['phi1'] = int(vc_match.group(4), 16)
+    else:
+        state['vc'] = None
+        state['vcbase'] = None
+        state['vmlines'] = None
+        state['phi1'] = None
+    video_base = state['video_base']  # e.g., 0xD000
+    
+    sprite_enabled = re.findall(r'Enabled:\s+([^\n]+)', output)
+    sprite_colors = re.findall(r'Color:\s+([^\n]+)', output)
+    if sprite_enabled:
+        state['sprites'] = []
+        enabled_list = sprite_enabled[0].split()
+        color_list = sprite_colors[0].split()
+        for i in range(8):
+            state['sprites'].append({
+                'enabled': enabled_list[i] != 'no',
+                'color': int(color_list[i], 16)
+            })
+    
+    dd00_val = parse_single_byte_dump(send_single_command(cmdlabel, "m dd00 dd00"))
+    state['cpu_bank'] = dd00_val & 0x03
+    state['active_bank_base'] = [0xC000, 0x0000, 0x4000, 0x8000][state['cpu_bank']]
+
+    return state
 
 
 
@@ -93,11 +212,222 @@ class ViceInstance:
 
 
 
+def draw_multicolor_grid(current_w, current_h,
+                         bitmap_bytes, screen_bytes, color_bytes,
+                         bg_color_index=0):
+
+    margin_x = current_w * GRID_MARGIN_X_PCT
+    margin_y = current_h * GRID_MARGIN_Y_PCT
+    target_w = current_w * GRID_WIDTH_PCT
+    target_h = current_h * GRID_HEIGHT_PCT
+    cell_size = int(max(1, round(min(target_w / GRID_COLS, target_h / GRID_ROWS))))
+    total_grid_w = GRID_COLS * cell_size
+    total_grid_h = GRID_ROWS * cell_size
+    grid_offset_x = int(round(current_w - margin_x - total_grid_w))
+    grid_offset_y = int(round(margin_y))
+
+    pixel_w = cell_size / 8
+    pixel_h = cell_size / 8
+
+    bg_color = C64_COLORS.get(bg_color_index, (0,0,0))
+
+    if isinstance(color_bytes[0], list):
+        color_bytes = [b for row in color_bytes for b in row]
+
+    for char_row in range(GRID_ROWS):
+        for char_col in range(GRID_COLS):
+            px = grid_offset_x + char_col * cell_size
+            py = grid_offset_y + char_row * cell_size
+            pygame.draw.rect(SCREEN, bg_color, pygame.Rect(px, py, cell_size, cell_size))
+
+            cell_index = char_row * GRID_COLS + char_col
+            if cell_index >= len(screen_bytes):
+                continue
+
+            scr = screen_bytes[cell_index]
+
+            color_01 = C64_COLORS.get((scr >> 4) & 0x0F, (255,255,255))
+            color_10 = C64_COLORS.get(scr & 0x0F, (255,255,255))
+            color_11 = C64_COLORS.get(color_bytes[cell_index] & 0x0F, (255,255,255))
+
+            for y_in_cell in range(8):
+                bitmap_offset = cell_index * 8 + y_in_cell
+                if bitmap_offset >= len(bitmap_bytes):
+                    continue
+
+                byte = bitmap_bytes[bitmap_offset]
+
+                for g in range(4):
+                    two_bits = (byte >> (6 - g * 2)) & 0x03
+
+                    if two_bits == 0:
+                        color = bg_color
+                    elif two_bits == 1:
+                        color = color_01
+                    elif two_bits == 2:
+                        color = color_10
+                    else:
+                        color = color_11
+
+                    rx = int(px + (g * 2) * pixel_w)
+                    ry = int(py + y_in_cell * pixel_h)
+
+                    SCREEN.fill(color,
+                        pygame.Rect(rx, ry,
+                                    int(2 * pixel_w + 0.5),
+                                    int(pixel_h + 0.5)))
+
+            pygame.draw.rect(SCREEN, (30,30,30), pygame.Rect(px, py, cell_size, cell_size), 1)
 
 
+def get_multicolor_data(context, vic_banknum):
+    
+    cmdlabel = inspect.currentframe().f_code.co_name
+
+    # for only bank0, need to read "ram" bank for everything
+    if vic_banknum == 0: # or vic_banknum == 3:
+        setrombank = send_single_command(cmdlabel, "bank ram")
+
+    dump_dd00 = send_single_command(cmdlabel, "m dd00 dd00")
+    dd00_val = parse_single_byte_dump(dump_dd00) & 0x03
+    bank_base = [0xC000, 0x0000, 0x4000, 0x8000][dd00_val]
+
+    dump_bg = send_single_command(cmdlabel, "m d021 d021")
+    bg_index = parse_single_byte_dump(dump_bg) & 0x0F
+    dump_d018 = send_single_command(cmdlabel, "m d018 d018")
+    d018_val = parse_single_byte_dump(dump_d018)
+
+    ecm = (d018_val >> 6) & 1
+    bmm = (d018_val >> 3) & 1
+    mcm = 1
+
+    if bmm == 1 and ecm == 0:   # Hires Bitmap
+        bitmap_base = bank_base + ((d018_val >> 3) & 1) * 0x2000
+        screen_base = bank_base + ((d018_val >> 4) & 0x07) * 0x0400
+    else:                       # Multicolor Bitmap
+        bitmap_base = bank_base + ((d018_val >> 3) & 0x01) * 0x2000
+        screen_base = bank_base + ((d018_val >> 4) & 0x0F) * 0x0400
+
+    screen_offset = ((d018_val >> 4) & 0x0F) * 0x0400
+   # screen_base = bank_base + screen_offset
+   # bitmap_base = bank_base + (0x2000 if (d018_val & 0x08) else 0x0000)
+
+    # for only bank3, need to read "ram" bank for data
+    if vic_banknum == 3:
+        print("setting BANK RAM -- banknum 3 detected")
+        setrombank = send_single_command(cmdlabel, "bank ram")
+
+    dump_bitmap = send_single_command(
+        cmdlabel,
+        f"m {bitmap_base:04x} {bitmap_base + 0x1FFF:04x}"
+    )
+    bitmap_bytes = parse_flat_hex_bytes(dump_bitmap)
+
+    dump_screen = send_single_command(
+        cmdlabel,
+        f"m {screen_base:04x} {screen_base + 0x03FF:04x}"
+    )
+    screen_bytes = parse_flat_hex_bytes(dump_screen)
+
+    dump_color = send_single_command(
+        cmdlabel,
+        "m d800 dbff"
+    )
+    color_bytes = parse_flat_hex_bytes(dump_color)
+    setrombank = send_single_command(cmdlabel, "bank cpu")
+
+    ## debug stuff
 
 
-def draw_grid(current_w, current_h, grid, screen_chars=None, charset_bytes=None):
+    dump_border = send_single_command(cmdlabel, "m d020 d020")
+    border = parse_single_byte_dump(dump_border) & 0x0F
+
+    dump_d016 = send_single_command(cmdlabel, "m d016 d016")
+    d016 = parse_single_byte_dump(dump_d016)
+    scroll_x = d016 & 7
+
+    dump_d011 = send_single_command(cmdlabel, "m d011 d011")
+    d011 = parse_single_byte_dump(dump_d011)
+    scroll_y = d011 & 7
+    rc = (d011 >> 1) & 7
+    idle = (d011 >> 7) & 1
+
+    cmdlabel = inspect.currentframe().f_code.co_name
+    
+
+    print("Mode: Multicolor Bitmap (ECM/BMM/MCM=%d/%d/%d)" % (ecm, bmm, mcm))
+    print("Colors: Border: %x BG: %x" % (border, bg_index))
+    print("Scroll X/Y: %d/%d, RC %d, Idle: %d, 40x25" % (scroll_x, scroll_y, rc, idle))
+    print("Video $%04x, Bitmap $%04x (RAM)" % (screen_base, bitmap_base))
+
+    ## end debug stuff
+
+
+    return bitmap_bytes, screen_bytes, color_bytes, bg_index
+
+
+def edit_multicolor_grid(bitmap_bytes, screen_bytes, color_bytes,
+                         current_w, current_h, mouse_pos, mouse_pressed,
+                         bg_color_index=0, toggle_mode=True):
+    
+    if not mouse_pressed:
+        return bitmap_bytes, screen_bytes, color_bytes
+    print("mouse pressed!!")
+
+    margin_x = current_w * GRID_MARGIN_X_PCT
+    margin_y = current_h * GRID_MARGIN_Y_PCT
+    target_w = current_w * GRID_WIDTH_PCT
+    target_h = current_h * GRID_HEIGHT_PCT
+    cell_size = int(max(1, round(min(target_w / GRID_COLS, target_h / GRID_ROWS))))
+    total_grid_w = GRID_COLS * cell_size
+    total_grid_h = GRID_ROWS * cell_size
+    grid_offset_x = int(round(current_w - margin_x - total_grid_w))
+    grid_offset_y = int(round(margin_y))
+
+    pixel_w = cell_size / 8
+    pixel_h = cell_size / 8
+
+    mx, my = mouse_pos
+
+    # figure out which char cell
+    if mx < grid_offset_x or my < grid_offset_y:
+        return bitmap_bytes, screen_bytes, color_bytes
+
+    char_col = int((mx - grid_offset_x) / cell_size)
+    char_row = int((my - grid_offset_y) / cell_size)
+    if char_col >= GRID_COLS or char_row >= GRID_ROWS:
+        return bitmap_bytes, screen_bytes, color_bytes
+
+    cell_index = char_row * GRID_COLS + char_col
+    if cell_index >= len(screen_bytes):
+        return bitmap_bytes, screen_bytes, color_bytes
+
+    # which pixel inside the 8x8 cell
+    px_in_cell = int((mx - grid_offset_x - char_col * cell_size) / pixel_w)
+    py_in_cell = int((my - grid_offset_y - char_row * cell_size) / pixel_h)
+    if px_in_cell > 7 or py_in_cell > 7:
+        return bitmap_bytes, screen_bytes, color_bytes
+
+    bitmap_offset = cell_index * 8 + py_in_cell
+    if bitmap_offset >= len(bitmap_bytes):
+        return bitmap_bytes, screen_bytes, color_bytes
+
+    # toggle the 2-bit multicolor pixel
+    shift = 6 - (px_in_cell // 2) * 2
+    mask = 0x03 << shift
+    current_val = (bitmap_bytes[bitmap_offset] & mask) >> shift
+
+    if toggle_mode:
+        new_val = 0 if current_val else 3
+    else:
+        new_val = 3
+
+    bitmap_bytes[bitmap_offset] = (bitmap_bytes[bitmap_offset] & ~mask) | (new_val << shift)
+
+    return bitmap_bytes, screen_bytes, color_bytes
+
+
+def draw_char_grid(current_w, current_h, grid, screen_chars=None, charset_bytes=None):
     margin_x = current_w * GRID_MARGIN_X_PCT
     margin_y = current_h * GRID_MARGIN_Y_PCT
 
@@ -201,7 +531,7 @@ def send_single_command(label, cmd_str, port=6510):
 
             for _ in range(3):
                 sock.sendall(b'\n')
-                time.sleep(0.5)
+                time.sleep(0.1)
 
             try:
                 sock.recv(4096)
@@ -222,7 +552,7 @@ def send_single_command(label, cmd_str, port=6510):
 
             response_text = response.decode(errors="ignore")
             print("[DEBUG][%s] Response:\n%s" % (label, response_text))
-            time.sleep(0.1)
+            #time.sleep(0.1)
 
     except Exception as e:
         print("[ERROR] communication failed: %s" % e)
@@ -435,8 +765,12 @@ def update_scrollable_list(event_list, screen, rect, items, scroll_y, selected_i
 def show_full_charset(screen, all_bytes, font, scale=2, chars_per_row=16):
     for char_code in range(256):
         # get 8 bytes for 1 char bitmap
+        #char_bytes = all_bytes[char_code*8 : char_code*8 + 8]
         char_bytes = all_bytes[char_code*8 : char_code*8 + 8]
+        if len(char_bytes) < 8:
+            char_bytes += [0] * (8 - len(char_bytes))
 
+        
         # set up like a bitmap to draw in pygame
         row_index = char_code // chars_per_row
         col_index = char_code % chars_per_row
@@ -451,8 +785,6 @@ def show_full_charset(screen, all_bytes, font, scale=2, chars_per_row=16):
                     py = base_y + row * scale
                     rect = pygame.Rect(px, py, scale, scale)
                     pygame.draw.rect(screen, (0, 255, 0), rect)
-
-
 
 
 def parse_single_byte_dump(dump_text):
@@ -532,66 +864,7 @@ def update_text_inputs(events, screen, font, boxes, state):
     return boxes
 
 
-def my_save_functionold(state, filename):
-    if not filename.endswith(".out"):
-        filename = filename + ".out"
-    with open(filename, "w") as f:
-        json.dump(state, f)
-
-
-def my_save_function(state, filename):
-    if not filename.endswith(".out"):
-        filename = filename + ".out"
-    with open(filename, "w") as f:
-        json.dump(state, f)
-
-    save_screen_chararray(filename, 
-                          state.get("charset"), 
-                          state.get("screen_chars"), 
-                          state.get("fullgrid"))
-    
-
-def my_load_function(state, filename):
-    with open(filename, "r") as f:
-        loaded = json.load(f)
-    state.clear()
-    state.update(loaded)
-
-
-
-
-def save_screen_chararray_old(filename, charset, screen_chars, fullgrid):
-    out_filename = f"{filename}_char.txt"
-    with open(out_filename, "w") as f:
-        def write_array(name, data):
-            f.write(f"unsigned char {name}[] = {{\n")
-            flat_data = []
-            for item in data:
-                if isinstance(item, list):
-                    flat_data.extend(item)
-                else:
-                    flat_data.append(item)
-
-            for i, val in enumerate(flat_data):
-                f.write(f"0x{val:02X}")
-                if i != len(flat_data) - 1:
-                    f.write(",")
-                if (i + 1) % 8 == 0:
-                    f.write("\n")
-                else:
-                    f.write(" ")
-            f.write("\n};\n\n")
-
-
-        if charset is not None:
-            write_array("chars", charset)
-        if screen_chars is not None:
-            write_array("screen_chars", screen_chars)
-        if fullgrid is not None:
-            write_array("fullgrid", fullgrid)
-
-
-def save_screen_chararray(filename, charset, screen_chars, fullgrid):
+def save_screen_chararray(filename, global_vars):
     out_filename = f"{filename}_char.txt"
     
     with open(out_filename, "w") as f:
@@ -618,18 +891,129 @@ def save_screen_chararray(filename, charset, screen_chars, fullgrid):
                     f.write(" ")
             
             f.write("};\n\n")
-            for i, row in enumerate(fullgrid):
-                row_cols = len(row)
-                
+            #for i, row in enumerate(fullgrid):
+            #    row_cols = len(row)
+            #    
                 #print(f"Row {i:02d} (Index {i}): {row_cols} columns wide.")
 
-        if charset is not None:
-            write_array("chars", charset)
-        if screen_chars is not None:
-            write_array("screen_chars", screen_chars)
-        if fullgrid is not None:
-            transposed_fullgrid = [list(col) for col in zip(*fullgrid)]
+        if global_vars["charset"] is not None:
+            write_array("chars", global_vars["charset"])
+        if global_vars["screen_chars"] is not None:
+            write_array("screen_chars", global_vars["screen_chars"])
+        if global_vars["fullgrid"] is not None:
+            transposed_fullgrid = [list(col) for col in zip(*global_vars["fullgrid"])]
             write_array("color_ram", transposed_fullgrid)
+        if global_vars["bitmap_bytes"] is not None:
+            write_array("bitmapbytes", global_vars["bitmap_bytes"])
+        if global_vars["screen_bytes"] is not None:
+            write_array("bitmapscreen", global_vars["screen_bytes"])
+        if global_vars["color_bytes"] is not None:
+            write_array("bitmapcolor", global_vars["color_bytes"])
+
+
+def write_multicolor_data(context, bitmap_bytes, screen_bytes, color_bytes, vic_bank):
+    cmdlabel = inspect.currentframe().f_code.co_name
+
+    dump_dd00 = send_single_command(cmdlabel, "m dd00 dd00")
+    dd00_val = parse_single_byte_dump(dump_dd00)
+    bank = (~dd00_val) & 0x03
+    bank_base = [0x0000, 0x4000, 0x8000, 0xC000][bank]
+
+    dump_d018 = send_single_command(cmdlabel, "m d018 d018")
+    d018_val = parse_single_byte_dump(dump_d018)
+
+    screen_page = (d018_val >> 4) & 0x0F
+    screen_base = bank_base + screen_page * 0x400
+    bitmap_base = bank_base + ((d018_val >> 3) & 0x01) * 0x2000
+
+    RGB_TO_C64 = {v: k for k, v in C64_COLORS.items()}
+
+    def flatten_color_bytes(data):
+        flat = []
+        for b in data:
+            if isinstance(b, (list, tuple)):
+                flat.extend(flatten_color_bytes(b))
+            elif isinstance(b, int):
+                flat.append(b)
+            elif isinstance(b, tuple) and len(b) == 3:
+                flat.append(RGB_TO_C64.get(b, 0))
+            else:
+                flat.append(0)
+        return flat
+    
+    def flatten_bytes(data):
+        flat = []
+        for b in data:
+            if isinstance(b, list):
+                flat.extend(flatten_bytes(b))
+            elif isinstance(b, tuple):
+                raise ValueError("color_bytes must contain color indices, not RGB tuples")
+            else:
+                flat.append(int(b))
+        return flat
+    
+    def flatten_bitmap_bytes(bitmap_bytes_2d):
+        flat = []
+        for char_cell in bitmap_bytes_2d:
+            if isinstance(char_cell, (list, tuple)):
+                if len(char_cell) != 8:
+                    raise ValueError("Each multicolor character cell must contain exactly 8 bytes")
+                for row_byte in char_cell:
+                    if not isinstance(row_byte, int):
+                        raise ValueError("Bitmap data must be integers")
+                    flat.append(row_byte & 0xFF)
+            elif isinstance(char_cell, int):
+                flat.append(char_cell & 0xFF)
+            else:
+                raise ValueError("Bitmap data must be integers or 8-byte lists/tuples")
+        return flat
+
+
+    color_bytes_flat = flatten_color_bytes(color_bytes)
+    bitmap_bytes_flat = flatten_bitmap_bytes(bitmap_bytes)
+    screen_bytes_flat = flatten_bytes(screen_bytes)
+    print(len(color_bytes_flat))
+
+    def fill_chunk(base_addr, data, bytes_per_cmd=64): # vice is limited here
+        for i in range(0, len(data), bytes_per_cmd):
+            chunk = data[i:i+bytes_per_cmd]
+            start = base_addr + i
+            end = start + len(chunk) - 1
+            hex_data = ",".join(f"{b & 0xFF:02X}" for b in chunk)
+            send_single_command(cmdlabel, f"f {start:04X} {end:04X} {hex_data}")
+
+    fill_chunk(bitmap_base, bitmap_bytes_flat)
+    fill_chunk(screen_base, screen_bytes_flat)
+    #fill_chunk(0xD800, color_bytes_flat)
+    fill_chunk(0xD800, color_bytes_flat[:0x400]) # limit to 1000 bytes, crappy workaround
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def my_save_function(state, filename):
+    if not filename.endswith(".out"):
+        filename = filename + ".out"
+    with open(filename, "w") as f:
+        json.dump(state, f)
+
+    save_screen_chararray(filename, global_vars)
+    
+
+def my_load_function(state, filename):
+    with open(filename, "r") as f:
+        loaded = json.load(f)
+    state.clear()
+    state.update(loaded)
 
 
 
@@ -647,13 +1031,6 @@ viewport1 = pygame.Rect(20, 500, 150, 100)
 scroll1 = 0
 selected1 = None
 
-
-
-
-text_boxesold = [ #save boxes on screen
-    {"rect": pygame.Rect(20, 500, 100, 30), "text": "", "active": False,
-     "save_rect": pygame.Rect(110, 320, 60, 30), "saved": False},  # left box
-]
 
 
 text_boxes = [
@@ -678,7 +1055,6 @@ def get_out_files(path):
 
 
 
-
 global_vars = {
     "fullgrid": None,
     "sprites": None,
@@ -688,9 +1064,13 @@ global_vars = {
     "screen_chars": None,
     "screen_base": None,
     "scroll_selected": 0, # index pos of "files"
-    "files": None
+    "files": None,
+    "bitmap_bytes": None,
+    "screen_bytes": None,
+    "color_bytes": None,
+    "bg_index": None,
+    "drawmode_toggle": 0
 }
-
 
 
 
@@ -703,7 +1083,6 @@ while True:
     events = pygame.event.get()
     for event in events:
         global_vars["files"] = get_out_files(".")
-
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
@@ -712,37 +1091,100 @@ while True:
             print(WIDTH, HEIGHT)
             SCREEN = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mouse_pos = event.pos
+            mouse_pressed = pygame.mouse.get_pressed()[0]  # True if left button is held
             if BUTTON1_RECT.collidepoint(event.pos):
+                button1_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
                 global_vars["fullgrid"] = get_color_grid(context)
+                button1_color = (200, 200, 200)
             elif BUTTON2_RECT.collidepoint(event.pos):
+                button2_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
                 sprites, bank = get_all_sprites(context)
                 global_vars["sprites"] = sprites
                 global_vars["sprite_bank"] = bank
+                button2_color = (200, 200, 200)
             elif BUTTON3_RECT.collidepoint(event.pos):
+                button3_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
                 charset_all_bytes, vic_bank, banknum = get_full_charset(context)
                 global_vars["charset"] = charset_all_bytes
+                button3_color = (200, 200, 200)
             elif BUTTON4_RECT.collidepoint(event.pos):
+                button4_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
                 screen_chars, screen_base, banknum = get_screen_chars(context)
                 global_vars["screen_chars"] = screen_chars
                 global_vars["screen_base"] = screen_base
                 global_vars["vic_bank"] = banknum
+                button4_color = (200, 200, 200)
             elif BUTTON5_RECT.collidepoint(event.pos):
+                button5_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
                 global_vars["charset"] = get_rom_charset(context)
+                button5_color = (200, 200, 200)
+            elif BUTTON6_RECT.collidepoint(event.pos):
+                button6_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
+                vic_state = parse_vic_state(context)
+                global_vars["bitmap_bytes"], global_vars["screen_bytes"], global_vars["color_bytes"], global_vars["bg_index"] = get_multicolor_data(context, vic_state['vic_bank'])
+                global_vars["color_bytes"] = [b for b in global_vars["color_bytes"]]
+                button6_color = (200, 200, 200)
+            elif BUTTON7_RECT.collidepoint(event.pos):
+                button7_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
+                global_vars["drawmode_toggle"] = 1 - global_vars.get("drawmode_toggle", 0)
+                button7_color = (200, 200, 200)
+            elif BUTTON8_RECT.collidepoint(event.pos):
+                button8_color = (255, 0, 0)
+                draw_buttons()
+                pygame.display.flip()
+                write_multicolor_data(
+                    context,
+                    global_vars["bitmap_bytes"],
+                    global_vars["screen_bytes"],
+                    global_vars["color_bytes"],
+                    global_vars["vic_bank"]
+                )
+                button8_color = (200, 200, 200)
 
-                
+
+
+
+
 
 
 
     viewport_rect = pygame.Rect(50, 150, 300, 200)
     SCREEN.fill((0, 0, 0))
     draw_buttons()
-    #draw_square()
     
-    if global_vars["fullgrid"] is not None:
-        draw_grid(WIDTH, HEIGHT,
-                global_vars["fullgrid"],
-                screen_chars=global_vars["screen_chars"],
-                charset_bytes=global_vars["charset"])
+    if global_vars["fullgrid"] is not None and global_vars["drawmode_toggle"] == 0:
+        draw_char_grid(WIDTH, HEIGHT,
+            global_vars["fullgrid"],
+            screen_chars=global_vars["screen_chars"],
+            charset_bytes=global_vars["charset"])
+        
+    if global_vars["bitmap_bytes"] is not None and global_vars["drawmode_toggle"] == 1:
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_pressed = pygame.mouse.get_pressed()[0]
+        if mouse_pos is not None:
+            global_vars["bitmap_bytes"], global_vars["screen_bytes"], global_vars["color_bytes"] = edit_multicolor_grid(global_vars["bitmap_bytes"], global_vars["screen_bytes"], global_vars["color_bytes"], WIDTH, HEIGHT, mouse_pos, mouse_pressed, bg_color_index=global_vars["bg_index"], toggle_mode=True)
+            time.sleep(0.1)
+        draw_multicolor_grid(WIDTH, HEIGHT, global_vars["bitmap_bytes"], global_vars["screen_bytes"], global_vars["color_bytes"], global_vars["bg_index"])
+
+
+
+
+
 
     if global_vars["sprites"] is not None:
         show_all_sprites(SCREEN, global_vars["sprites"], font)
